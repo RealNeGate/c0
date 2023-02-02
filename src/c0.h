@@ -57,13 +57,34 @@ struct C0String {
 #endif
 #endif
 
-#ifndef C0_ASSERT
-#include <assert.h>
-#define C0_ASSERT(cond) assert(cond)
+#ifndef C0_DEBUG_TRAP
+	#if defined(_MSC_VER)
+	 	#if _MSC_VER < 1300
+		#define C0_DEBUG_TRAP() __asm int 3 /* Trap to debugger! */
+		#else
+		#define C0_DEBUG_TRAP() __debugbreak()
+		#endif
+	#else
+		#define C0_DEBUG_TRAP() __builtin_trap()
+	#endif
 #endif
 
+static void c0_assert_handler(char const *prefix, char const *condition, char const *file, int line, char const *msg, ...);
+
+#ifndef C0_ASSERT_MSG
+#define C0_ASSERT_MSG(cond, msg, ...) do { \
+	if (!(cond)) { \
+		c0_assert_handler("Assertion Failure", #cond, __FILE__, __LINE__, msg, ##__VA_ARGS__); \
+		C0_DEBUG_TRAP(); \
+	} \
+} while (0)
+#endif
+
+#ifndef C0_ASSERT
+#define C0_ASSERT(cond) C0_ASSERT_MSG(cond, NULL)
+#endif
 #ifndef C0_PANIC
-#define C0_PANIC(msg) C0_ASSERT(0 && msg)
+#define C0_PANIC(msg) C0_ASSERT_MSG(0, msg)
 #endif
 
 
@@ -73,9 +94,9 @@ struct C0String {
 #endif
 
 struct C0Array {
-	alignas(2*sizeof(usize))
-	usize len;
-	usize cap;
+	alignas(2*sizeof(isize))
+	isize len;
+	isize cap;
 };
 
 #define C0Array(T) T *
@@ -119,7 +140,7 @@ struct C0Array {
 		: false)
 
 #define c0array_ordered_remove(array, index) do { \
-	assert((usize)index < c0array_len(array)); \
+	C0_ASSERT((usize)index < (usize)c0array_len(array)); \
 	memmove(&(array)[index], &(array)[index+1], (c0array_len(array) - (index)-1) * sizeof(*(array))); \
 	c0array_meta(array)->len -= 1; \
 } while (0)
@@ -240,502 +261,64 @@ static C0BasicType c0_basic_unsigned_type[C0Basic_COUNT] = {
 	C0Basic_ptr,
 };
 
-// name, ret_type, arg_count, trivial operator
-#define C0_INSTR_TABLE \
-	C0_INSTR(invalid, void, 0, ""), \
-\
-	C0_INSTR(load_i8,    i8,   1, ""), \
-	C0_INSTR(load_u8,    u8,   1, ""), \
-	C0_INSTR(load_i16,   i16,  1, ""), \
-	C0_INSTR(load_u16,   u16,  1, ""), \
-	C0_INSTR(load_i32,   i32,  1, ""), \
-	C0_INSTR(load_u32,   u32,  1, ""), \
-	C0_INSTR(load_i64,   i64,  1, ""), \
-	C0_INSTR(load_u64,   u64,  1, ""), \
-	C0_INSTR(load_i128,  i128, 1, ""), \
-	C0_INSTR(load_u128,  u128, 1, ""), \
-	C0_INSTR(load_f16,   f16,  1, ""), \
-	C0_INSTR(load_f32,   f32,  1, ""), \
-	C0_INSTR(load_f64,   f64,  1, ""), \
-	C0_INSTR(load_ptr,   ptr,  1, ""), \
-	C0_INSTR(store_i8,   i8,   2, ""), \
-	C0_INSTR(store_u8,   u8,   2, ""), \
-	C0_INSTR(store_i16,  i16,  2, ""), \
-	C0_INSTR(store_u16,  u16,  2, ""), \
-	C0_INSTR(store_i32,  i32,  2, ""), \
-	C0_INSTR(store_u32,  u32,  2, ""), \
-	C0_INSTR(store_i64,  i64,  2, ""), \
-	C0_INSTR(store_u64,  u64,  2, ""), \
-	C0_INSTR(store_i128, i128, 2, ""), \
-	C0_INSTR(store_u128, u128, 2, ""), \
-	C0_INSTR(store_f16,  f16,  2, ""), \
-	C0_INSTR(store_f32,  f32,  2, ""), \
-	C0_INSTR(store_f64,  f64,  2, ""), \
-	C0_INSTR(store_ptr,  ptr,  2, ""), \
-\
-	C0_INSTR(clz_i8,   i8,      1, ""), \
-	C0_INSTR(clz_u8,   u8,      1, ""), \
-	C0_INSTR(clz_i16,  i16,     1, ""), \
-	C0_INSTR(clz_u16,  u16,     1, ""), \
-	C0_INSTR(clz_i32,  i32,     1, ""), \
-	C0_INSTR(clz_u32,  u32,     1, ""), \
-	C0_INSTR(clz_i64,  i64,     1, ""), \
-	C0_INSTR(clz_u64,  u64,     1, ""), \
-	C0_INSTR(clz_i128, i128,    1, ""), \
-	C0_INSTR(clz_u128, u128,    1, ""), \
-	C0_INSTR(ctz_i8,   i8,      1, ""), \
-	C0_INSTR(ctz_u8,   u8,      1, ""), \
-	C0_INSTR(ctz_i16,  i16,     1, ""), \
-	C0_INSTR(ctz_u16,  u16,     1, ""), \
-	C0_INSTR(ctz_i32,  i32,     1, ""), \
-	C0_INSTR(ctz_u32,  u32,     1, ""), \
-	C0_INSTR(ctz_i64,  i64,     1, ""), \
-	C0_INSTR(ctz_u64,  u64,     1, ""), \
-	C0_INSTR(ctz_i128, i128,    1, ""), \
-	C0_INSTR(ctz_u128, u128,    1, ""), \
-	C0_INSTR(popcnt_i8,   i8,   1, ""), \
-	C0_INSTR(popcnt_u8,   u8,   1, ""), \
-	C0_INSTR(popcnt_i16,  i16,  1, ""), \
-	C0_INSTR(popcnt_u16,  u16,  1, ""), \
-	C0_INSTR(popcnt_i32,  i32,  1, ""), \
-	C0_INSTR(popcnt_u32,  u32,  1, ""), \
-	C0_INSTR(popcnt_i64,  i64,  1, ""), \
-	C0_INSTR(popcnt_u64,  u64,  1, ""), \
-	C0_INSTR(popcnt_i128, i128, 1, ""), \
-	C0_INSTR(popcnt_u128, u128, 1, ""), \
-	C0_INSTR(abs_i8,   i8,      1, ""), \
-	C0_INSTR(abs_i16,  i16,     1, ""), \
-	C0_INSTR(abs_i32,  i32,     1, ""), \
-	C0_INSTR(abs_i64,  i64,     1, ""), \
-	C0_INSTR(abs_i128, i128,    1, ""), \
-\
-	C0_INSTR(negf_f16,     f16, 1, ""), \
-	C0_INSTR(negf_f32,     f32, 1, ""), \
-	C0_INSTR(negf_f64,     f64, 1, ""), \
-	C0_INSTR(absf_f16,     f16, 1, ""), \
-	C0_INSTR(absf_f32,     f32, 1, ""), \
-	C0_INSTR(absf_f64,     f64, 1, ""), \
-	C0_INSTR(ceilf_f16,    f16, 1, ""), \
-	C0_INSTR(ceilf_f32,    f32, 1, ""), \
-	C0_INSTR(ceilf_f64,    f64, 1, ""), \
-	C0_INSTR(floorf_f16,   f16, 1, ""), \
-	C0_INSTR(floorf_f32,   f32, 1, ""), \
-	C0_INSTR(floorf_f64,   f64, 1, ""), \
-	C0_INSTR(nearestf_f16, f16, 1, ""), \
-	C0_INSTR(nearestf_f32, f32, 1, ""), \
-	C0_INSTR(nearestf_f64, f64, 1, ""), \
-	C0_INSTR(truncf_f16,   f16, 1, ""), \
-	C0_INSTR(truncf_f32,   f32, 1, ""), \
-	C0_INSTR(truncf_f64,   f64, 1, ""), \
-	C0_INSTR(sqrtf_f16,    f16, 1, ""), \
-	C0_INSTR(sqrtf_f32,    f32, 1, ""), \
-	C0_INSTR(sqrtf_f64,    f64, 1, ""), \
-\
-	C0_INSTR(add_i8,   i8,   2, ""), \
-	C0_INSTR(add_u8,   u8,   2, ""), \
-	C0_INSTR(add_i16,  i16,  2, ""), \
-	C0_INSTR(add_u16,  u16,  2, ""), \
-	C0_INSTR(add_i32,  i32,  2, ""), \
-	C0_INSTR(add_u32,  u32,  2, ""), \
-	C0_INSTR(add_i64,  i64,  2, ""), \
-	C0_INSTR(add_u64,  u64,  2, ""), \
-	C0_INSTR(add_i128, i128, 2, ""), \
-	C0_INSTR(add_u128, u128, 2, ""), \
-	C0_INSTR(sub_i8,   i8,   2, ""), \
-	C0_INSTR(sub_u8,   u8,   2, ""), \
-	C0_INSTR(sub_i16,  i16,  2, ""), \
-	C0_INSTR(sub_u16,  u16,  2, ""), \
-	C0_INSTR(sub_i32,  i32,  2, ""), \
-	C0_INSTR(sub_u32,  u32,  2, ""), \
-	C0_INSTR(sub_i64,  i64,  2, ""), \
-	C0_INSTR(sub_u64,  u64,  2, ""), \
-	C0_INSTR(sub_i128, i128, 2, ""), \
-	C0_INSTR(sub_u128, u128, 2, ""), \
-	C0_INSTR(mul_i8,   i8,   2, ""), \
-	C0_INSTR(mul_u8,   u8,   2, ""), \
-	C0_INSTR(mul_i16,  i16,  2, ""), \
-	C0_INSTR(mul_u16,  u16,  2, ""), \
-	C0_INSTR(mul_i32,  i32,  2, ""), \
-	C0_INSTR(mul_u32,  u32,  2, ""), \
-	C0_INSTR(mul_i64,  i64,  2, ""), \
-	C0_INSTR(mul_u64,  u64,  2, ""), \
-	C0_INSTR(mul_i128, i128, 2, ""), \
-	C0_INSTR(mul_u128, u128, 2, ""), \
-	C0_INSTR(quo_i8,   i8,   2, ""), \
-	C0_INSTR(quo_u8,   u8,   2, ""), \
-	C0_INSTR(quo_i16,  i16,  2, ""), \
-	C0_INSTR(quo_u16,  u16,  2, ""), \
-	C0_INSTR(quo_i32,  i32,  2, ""), \
-	C0_INSTR(quo_u32,  u32,  2, ""), \
-	C0_INSTR(quo_i64,  i64,  2, ""), \
-	C0_INSTR(quo_u64,  u64,  2, ""), \
-	C0_INSTR(quo_i128, i128, 2, ""), \
-	C0_INSTR(quo_u128, u128, 2, ""), \
-	C0_INSTR(rem_i8,   i8,   2, ""), \
-	C0_INSTR(rem_u8,   u8,   2, ""), \
-	C0_INSTR(rem_i16,  i16,  2, ""), \
-	C0_INSTR(rem_u16,  u16,  2, ""), \
-	C0_INSTR(rem_i32,  i32,  2, ""), \
-	C0_INSTR(rem_u32,  u32,  2, ""), \
-	C0_INSTR(rem_i64,  i64,  2, ""), \
-	C0_INSTR(rem_u64,  u64,  2, ""), \
-	C0_INSTR(rem_i128, i128, 2, ""), \
-	C0_INSTR(rem_u128, u128, 2, ""), \
-	/* C-like shifts */ \
-	C0_INSTR(shlc_i8,   i8,   2, ""), \
-	C0_INSTR(shlc_u8,   u8,   2, ""), \
-	C0_INSTR(shlc_i16,  i16,  2, ""), \
-	C0_INSTR(shlc_u16,  u16,  2, ""), \
-	C0_INSTR(shlc_i32,  i32,  2, ""), \
-	C0_INSTR(shlc_u32,  u32,  2, ""), \
-	C0_INSTR(shlc_i64,  i64,  2, ""), \
-	C0_INSTR(shlc_u64,  u64,  2, ""), \
-	C0_INSTR(shlc_i128, i128, 2, ""), \
-	C0_INSTR(shlc_u128, u128, 2, ""), \
-	C0_INSTR(shrc_i8,   i8,   2, ""), \
-	C0_INSTR(shrc_u8,   u8,   2, ""), \
-	C0_INSTR(shrc_i16,  i16,  2, ""), \
-	C0_INSTR(shrc_u16,  u16,  2, ""), \
-	C0_INSTR(shrc_i32,  i32,  2, ""), \
-	C0_INSTR(shrc_u32,  u32,  2, ""), \
-	C0_INSTR(shrc_i64,  i64,  2, ""), \
-	C0_INSTR(shrc_u64,  u64,  2, ""), \
-	C0_INSTR(shrc_i128, i128, 2, ""), \
-	C0_INSTR(shrc_u128, u128, 2, ""), \
-	/* Odin-like shifts */ \
-	C0_INSTR(shlo_i8,   i8,   2, ""), \
-	C0_INSTR(shlo_u8,   u8,   2, ""), \
-	C0_INSTR(shlo_i16,  i16,  2, ""), \
-	C0_INSTR(shlo_u16,  u16,  2, ""), \
-	C0_INSTR(shlo_i32,  i32,  2, ""), \
-	C0_INSTR(shlo_u32,  u32,  2, ""), \
-	C0_INSTR(shlo_i64,  i64,  2, ""), \
-	C0_INSTR(shlo_u64,  u64,  2, ""), \
-	C0_INSTR(shlo_i128, i128, 2, ""), \
-	C0_INSTR(shlo_u128, u128, 2, ""), \
-	C0_INSTR(shro_i8,   i8,   2, ""), \
-	C0_INSTR(shro_u8,   u8,   2, ""), \
-	C0_INSTR(shro_i16,  i16,  2, ""), \
-	C0_INSTR(shro_u16,  u16,  2, ""), \
-	C0_INSTR(shro_i32,  i32,  2, ""), \
-	C0_INSTR(shro_u32,  u32,  2, ""), \
-	C0_INSTR(shro_i64,  i64,  2, ""), \
-	C0_INSTR(shro_u64,  u64,  2, ""), \
-	C0_INSTR(shro_i128, i128, 2, ""), \
-	C0_INSTR(shro_u128, u128, 2, ""), \
-\
-	C0_INSTR(and_i8,   i8,   2, "&"), \
-	C0_INSTR(and_u8,   u8,   2, "&"), \
-	C0_INSTR(and_i16,  i16,  2, "&"), \
-	C0_INSTR(and_u16,  u16,  2, "&"), \
-	C0_INSTR(and_i32,  i32,  2, "&"), \
-	C0_INSTR(and_u32,  u32,  2, "&"), \
-	C0_INSTR(and_i64,  i64,  2, "&"), \
-	C0_INSTR(and_u64,  u64,  2, "&"), \
-	C0_INSTR(and_i128, i128, 2, "&"), \
-	C0_INSTR(and_u128, u128, 2, "&"), \
-	C0_INSTR(or_i8,   i8,   2, "|"), \
-	C0_INSTR(or_u8,   u8,   2, "|"), \
-	C0_INSTR(or_i16,  i16,  2, "|"), \
-	C0_INSTR(or_u16,  u16,  2, "|"), \
-	C0_INSTR(or_i32,  i32,  2, "|"), \
-	C0_INSTR(or_u32,  u32,  2, "|"), \
-	C0_INSTR(or_i64,  i64,  2, "|"), \
-	C0_INSTR(or_u64,  u64,  2, "|"), \
-	C0_INSTR(or_i128, i128, 2, "|"), \
-	C0_INSTR(or_u128, u128, 2, "|"), \
-	C0_INSTR(xor_i8,   i8,   2, "^"), \
-	C0_INSTR(xor_u8,   u8,   2, "^"), \
-	C0_INSTR(xor_i16,  i16,  2, "^"), \
-	C0_INSTR(xor_u16,  u16,  2, "^"), \
-	C0_INSTR(xor_i32,  i32,  2, "^"), \
-	C0_INSTR(xor_u32,  u32,  2, "^"), \
-	C0_INSTR(xor_i64,  i64,  2, "^"), \
-	C0_INSTR(xor_u64,  u64,  2, "^"), \
-	C0_INSTR(xor_i128, i128, 2, "^"), \
-	C0_INSTR(xor_u128, u128, 2, "^"), \
-	C0_INSTR(eq_i8,   u8, 2, "=="), \
-	C0_INSTR(eq_u8,   u8, 2, "=="), \
-	C0_INSTR(eq_i16,  u8, 2, "=="), \
-	C0_INSTR(eq_u16,  u8, 2, "=="), \
-	C0_INSTR(eq_i32,  u8, 2, "=="), \
-	C0_INSTR(eq_u32,  u8, 2, "=="), \
-	C0_INSTR(eq_i64,  u8, 2, "=="), \
-	C0_INSTR(eq_u64,  u8, 2, "=="), \
-	C0_INSTR(eq_i128, u8, 2, "=="), \
-	C0_INSTR(eq_u128, u8, 2, "=="), \
-	C0_INSTR(neq_i8,   u8, 2, "!="), \
-	C0_INSTR(neq_u8,   u8, 2, "!="), \
-	C0_INSTR(neq_i16,  u8, 2, "!="), \
-	C0_INSTR(neq_u16,  u8, 2, "!="), \
-	C0_INSTR(neq_i32,  u8, 2, "!="), \
-	C0_INSTR(neq_u32,  u8, 2, "!="), \
-	C0_INSTR(neq_i64,  u8, 2, "!="), \
-	C0_INSTR(neq_u64,  u8, 2, "!="), \
-	C0_INSTR(neq_i128, u8, 2, "!="), \
-	C0_INSTR(neq_u128, u8, 2, "!="), \
-	C0_INSTR(lt_i8,   u8, 2, "<"), \
-	C0_INSTR(lt_u8,   u8, 2, "<"), \
-	C0_INSTR(lt_i16,  u8, 2, "<"), \
-	C0_INSTR(lt_u16,  u8, 2, "<"), \
-	C0_INSTR(lt_i32,  u8, 2, "<"), \
-	C0_INSTR(lt_u32,  u8, 2, "<"), \
-	C0_INSTR(lt_i64,  u8, 2, "<"), \
-	C0_INSTR(lt_u64,  u8, 2, "<"), \
-	C0_INSTR(lt_i128, u8, 2, "<"), \
-	C0_INSTR(lt_u128, u8, 2, "<"), \
-	C0_INSTR(gt_i8,   u8, 2, ">"), \
-	C0_INSTR(gt_u8,   u8, 2, ">"), \
-	C0_INSTR(gt_i16,  u8, 2, ">"), \
-	C0_INSTR(gt_u16,  u8, 2, ">"), \
-	C0_INSTR(gt_i32,  u8, 2, ">"), \
-	C0_INSTR(gt_u32,  u8, 2, ">"), \
-	C0_INSTR(gt_i64,  u8, 2, ">"), \
-	C0_INSTR(gt_u64,  u8, 2, ">"), \
-	C0_INSTR(gt_i128, u8, 2, ">"), \
-	C0_INSTR(gt_u128, u8, 2, ">"), \
-	C0_INSTR(lteq_i8,   u8, 2, "<="), \
-	C0_INSTR(lteq_u8,   u8, 2, "<="), \
-	C0_INSTR(lteq_i16,  u8, 2, "<="), \
-	C0_INSTR(lteq_u16,  u8, 2, "<="), \
-	C0_INSTR(lteq_i32,  u8, 2, "<="), \
-	C0_INSTR(lteq_u32,  u8, 2, "<="), \
-	C0_INSTR(lteq_i64,  u8, 2, "<="), \
-	C0_INSTR(lteq_u64,  u8, 2, "<="), \
-	C0_INSTR(lteq_i128, u8, 2, "<="), \
-	C0_INSTR(lteq_u128, u8, 2, "<="), \
-	C0_INSTR(gteq_i8,   u8, 2, ">="), \
-	C0_INSTR(gteq_u8,   u8, 2, ">="), \
-	C0_INSTR(gteq_i16,  u8, 2, ">="), \
-	C0_INSTR(gteq_u16,  u8, 2, ">="), \
-	C0_INSTR(gteq_i32,  u8, 2, ">="), \
-	C0_INSTR(gteq_u32,  u8, 2, ">="), \
-	C0_INSTR(gteq_i64,  u8, 2, ">="), \
-	C0_INSTR(gteq_u64,  u8, 2, ">="), \
-	C0_INSTR(gteq_i128, u8, 2, ">="), \
-	C0_INSTR(gteq_u128, u8, 2, ">="), \
-	C0_INSTR(min_i8,   i8,   2, ""), \
-	C0_INSTR(min_u8,   u8,   2, ""), \
-	C0_INSTR(min_i16,  i16,  2, ""), \
-	C0_INSTR(min_u16,  u16,  2, ""), \
-	C0_INSTR(min_i32,  i32,  2, ""), \
-	C0_INSTR(min_u32,  u32,  2, ""), \
-	C0_INSTR(min_i64,  i64,  2, ""), \
-	C0_INSTR(min_u64,  u64,  2, ""), \
-	C0_INSTR(min_i128, i128, 2, ""), \
-	C0_INSTR(min_u128, u128, 2, ""), \
-	C0_INSTR(max_i8,   i8,   2, ""), \
-	C0_INSTR(max_u8,   u8,   2, ""), \
-	C0_INSTR(max_i16,  i16,  2, ""), \
-	C0_INSTR(max_u16,  u16,  2, ""), \
-	C0_INSTR(max_i32,  i32,  2, ""), \
-	C0_INSTR(max_u32,  u32,  2, ""), \
-	C0_INSTR(max_i64,  i64,  2, ""), \
-	C0_INSTR(max_u64,  u64,  2, ""), \
-	C0_INSTR(max_i128, i128, 2, ""), \
-	C0_INSTR(max_u128, u128, 2, ""), \
-\
-	C0_INSTR(addf_f16,  f16, 2, "+"), \
-	C0_INSTR(addf_f32,  f32, 2, "+"), \
-	C0_INSTR(addf_f64,  f64, 2, "+"), \
-	C0_INSTR(subf_f16,  f16, 2, "-"), \
-	C0_INSTR(subf_f32,  f32, 2, "-"), \
-	C0_INSTR(subf_f64,  f64, 2, "-"), \
-	C0_INSTR(mulf_f16,  f16, 2, "*"), \
-	C0_INSTR(mulf_f32,  f32, 2, "*"), \
-	C0_INSTR(mulf_f64,  f64, 2, "*"), \
-	C0_INSTR(divf_f16,  f16, 2, "/"), \
-	C0_INSTR(divf_f32,  f32, 2, "/"), \
-	C0_INSTR(divf_f64,  f64, 2, "/"), \
-	C0_INSTR(eqf_f16,    u8, 2, "=="), \
-	C0_INSTR(eqf_f32,    u8, 2, "=="), \
-	C0_INSTR(eqf_f64,    u8, 2, "=="), \
-	C0_INSTR(neqf_f16,   u8, 2, "!="), \
-	C0_INSTR(neqf_f32,   u8, 2, "!="), \
-	C0_INSTR(neqf_f64,   u8, 2, "!="), \
-	C0_INSTR(ltf_f16,    u8, 2, "<"), \
-	C0_INSTR(ltf_f32,    u8, 2, "<"), \
-	C0_INSTR(ltf_f64,    u8, 2, "<"), \
-	C0_INSTR(gtf_f16,    u8, 2, ">"), \
-	C0_INSTR(gtf_f32,    u8, 2, ">"), \
-	C0_INSTR(gtf_f64,    u8, 2, ">"), \
-	C0_INSTR(lteqf_f16,  u8, 2, "<="), \
-	C0_INSTR(lteqf_f32,  u8, 2, "<="), \
-	C0_INSTR(lteqf_f64,  u8, 2, "<="), \
-	C0_INSTR(gteqf_f16,  u8, 2, ">="), \
-	C0_INSTR(gteqf_f32,  u8, 2, ">="), \
-	C0_INSTR(gteqf_f64,  u8, 2, ">="), \
-\
-	C0_INSTR(convert,     void, 1, ""), \
-	C0_INSTR(reinterpret, void, 1, ""), \
-\
-	C0_INSTR(atomic_thread_fence, void, 0, ""), \
-	C0_INSTR(atomic_signal_fence, void, 0, ""), \
-\
-	C0_INSTR(atomic_load_i8,    i8,   1, ""), \
-	C0_INSTR(atomic_load_u8,    u8,   1, ""), \
-	C0_INSTR(atomic_load_i16,   i16,  1, ""), \
-	C0_INSTR(atomic_load_u16,   u16,  1, ""), \
-	C0_INSTR(atomic_load_i32,   i32,  1, ""), \
-	C0_INSTR(atomic_load_u32,   u32,  1, ""), \
-	C0_INSTR(atomic_load_i64,   i64,  1, ""), \
-	C0_INSTR(atomic_load_u64,   u64,  1, ""), \
-	C0_INSTR(atomic_load_f16,   f16,  1, ""), \
-	C0_INSTR(atomic_load_f32,   f32,  1, ""), \
-	C0_INSTR(atomic_load_f64,   f64,  1, ""), \
-	C0_INSTR(atomic_load_ptr,   ptr,  1, ""), \
-	C0_INSTR(atomic_store_i8,   i8,   2, ""), \
-	C0_INSTR(atomic_store_u8,   u8,   2, ""), \
-	C0_INSTR(atomic_store_i16,  i16,  2, ""), \
-	C0_INSTR(atomic_store_u16,  u16,  2, ""), \
-	C0_INSTR(atomic_store_i32,  i32,  2, ""), \
-	C0_INSTR(atomic_store_u32,  u32,  2, ""), \
-	C0_INSTR(atomic_store_i64,  i64,  2, ""), \
-	C0_INSTR(atomic_store_u64,  u64,  2, ""), \
-	C0_INSTR(atomic_store_f16,  f16,  2, ""), \
-	C0_INSTR(atomic_store_f32,  f32,  2, ""), \
-	C0_INSTR(atomic_store_f64,  f64,  2, ""), \
-	C0_INSTR(atomic_store_ptr,  ptr,  2, ""), \
-\
-	C0_INSTR(atomic_xchg_i8,   u8, 2, ""), \
-	C0_INSTR(atomic_xchg_u8,   u8, 2, ""), \
-	C0_INSTR(atomic_xchg_i16,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_u16,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_i32,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_u32,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_i64,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_u64,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_f16,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_f32,  u8, 2, ""), \
-	C0_INSTR(atomic_xchg_f64,  u8, 2, ""), \
-	C0_INSTR(atomic_cas_i8,    void, 3, ""), \
-	C0_INSTR(atomic_cas_u8,    void, 3, ""), \
-	C0_INSTR(atomic_cas_i16,   void, 3, ""), \
-	C0_INSTR(atomic_cas_u16,   void, 3, ""), \
-	C0_INSTR(atomic_cas_i32,   void, 3, ""), \
-	C0_INSTR(atomic_cas_u32,   void, 3, ""), \
-	C0_INSTR(atomic_cas_i64,   void, 3, ""), \
-	C0_INSTR(atomic_cas_u64,   void, 3, ""), \
-	C0_INSTR(atomic_cas_f16,   void, 3, ""), \
-	C0_INSTR(atomic_cas_f32,   void, 3, ""), \
-	C0_INSTR(atomic_cas_f64,   void, 3, ""), \
-\
-	C0_INSTR(atomic_add_i8,   i8,   2, ""), \
-	C0_INSTR(atomic_add_u8,   u8,   2, ""), \
-	C0_INSTR(atomic_add_i16,  i16,  2, ""), \
-	C0_INSTR(atomic_add_u16,  u16,  2, ""), \
-	C0_INSTR(atomic_add_i32,  i32,  2, ""), \
-	C0_INSTR(atomic_add_u32,  u32,  2, ""), \
-	C0_INSTR(atomic_add_i64,  i64,  2, ""), \
-	C0_INSTR(atomic_add_u64,  u64,  2, ""), \
-	C0_INSTR(atomic_addf_f16,  f16, 2, ""), \
-	C0_INSTR(atomic_addf_f32,  f32, 2, ""), \
-	C0_INSTR(atomic_addf_f64,  f64, 2, ""), \
-	C0_INSTR(atomic_sub_i8,   i8,   2, ""), \
-	C0_INSTR(atomic_sub_u8,   u8,   2, ""), \
-	C0_INSTR(atomic_sub_i16,  i16,  2, ""), \
-	C0_INSTR(atomic_sub_u16,  u16,  2, ""), \
-	C0_INSTR(atomic_sub_i32,  i32,  2, ""), \
-	C0_INSTR(atomic_sub_u32,  u32,  2, ""), \
-	C0_INSTR(atomic_sub_i64,  i64,  2, ""), \
-	C0_INSTR(atomic_sub_u64,  u64,  2, ""), \
-	C0_INSTR(atomic_subf_f16,  f16, 2, ""), \
-	C0_INSTR(atomic_subf_f32,  f32, 2, ""), \
-	C0_INSTR(atomic_subf_f64,  f64, 2, ""), \
-	C0_INSTR(atomic_and_i8,   i8,   2, ""), \
-	C0_INSTR(atomic_and_u8,   u8,   2, ""), \
-	C0_INSTR(atomic_and_i16,  i16,  2, ""), \
-	C0_INSTR(atomic_and_u16,  u16,  2, ""), \
-	C0_INSTR(atomic_and_i32,  i32,  2, ""), \
-	C0_INSTR(atomic_and_u32,  u32,  2, ""), \
-	C0_INSTR(atomic_and_i64,  i64,  2, ""), \
-	C0_INSTR(atomic_and_u64,  u64,  2, ""), \
-	C0_INSTR(atomic_or_i8,   i8,   2, ""), \
-	C0_INSTR(atomic_or_u8,   u8,   2, ""), \
-	C0_INSTR(atomic_or_i16,  i16,  2, ""), \
-	C0_INSTR(atomic_or_u16,  u16,  2, ""), \
-	C0_INSTR(atomic_or_i32,  i32,  2, ""), \
-	C0_INSTR(atomic_or_u32,  u32,  2, ""), \
-	C0_INSTR(atomic_or_i64,  i64,  2, ""), \
-	C0_INSTR(atomic_or_u64,  u64,  2, ""), \
-	C0_INSTR(atomic_xor_i8,   i8,   2, ""), \
-	C0_INSTR(atomic_xor_u8,   u8,   2, ""), \
-	C0_INSTR(atomic_xor_i16,  i16,  2, ""), \
-	C0_INSTR(atomic_xor_u16,  u16,  2, ""), \
-	C0_INSTR(atomic_xor_i32,  i32,  2, ""), \
-	C0_INSTR(atomic_xor_u32,  u32,  2, ""), \
-	C0_INSTR(atomic_xor_i64,  i64,  2, ""), \
-	C0_INSTR(atomic_xor_u64,  u64,  2, ""), \
-\
-	C0_INSTR(select_i8,   i8,   3, ""), \
-	C0_INSTR(select_u8,   u8,   3, ""), \
-	C0_INSTR(select_i16,  i16,  3, ""), \
-	C0_INSTR(select_u16,  u16,  3, ""), \
-	C0_INSTR(select_i32,  i32,  3, ""), \
-	C0_INSTR(select_u32,  u32,  3, ""), \
-	C0_INSTR(select_i64,  i64,  3, ""), \
-	C0_INSTR(select_u64,  u64,  3, ""), \
-	C0_INSTR(select_i128, i128, 3, ""), \
-	C0_INSTR(select_u128, u128, 3, ""), \
-	C0_INSTR(select_f16,  f16,  3, ""), \
-	C0_INSTR(select_f32,  f32,  3, ""), \
-	C0_INSTR(select_f64,  f64,  3, ""), \
-	C0_INSTR(select_ptr,  ptr,  3, ""), \
-\
-	C0_INSTR(memmove, void, 3, ""), \
-	C0_INSTR(memset,  void, 3, ""), \
-\
-	C0_INSTR(decl, void, 0, ""), \
-	C0_INSTR(addr, ptr, 1, ""), \
-	C0_INSTR(index_ptr, ptr, 2, ""), \
-	C0_INSTR(field_ptr, ptr, 1, ""), \
-\
-	C0_INSTR(call,  void, -1, ""), \
-\
-	C0_INSTR(if,    void, -1, ""), \
-	C0_INSTR(loop,  void, 0,  ""), \
-	C0_INSTR(block, void, 0,  ""), \
-\
-	C0_INSTR(continue,    void, 0,  ""), \
-	C0_INSTR(break,       void, 0,  ""), \
-	C0_INSTR(return,      void, -1, ""), \
-	C0_INSTR(unreachable, void, 0,  ""), \
-	C0_INSTR(goto,        void, 1,  ""), \
-	C0_INSTR(label,       void, 0,  ""), \
+static u8 c0_basic_unsigned_instr_offset[C0Basic_COUNT] = {
+	0,
+	0,
+	0,
+	1,
+	1,
+	2,
+	2,
+	3,
+	3,
+	4,
+	4,
+	5,
+	6,
+	7,
+	8,
+};
+
 
 
 
 typedef u16 C0InstrKind;
 enum C0InstrKind_enum {
-#define C0_INSTR(name, type, arg_count, symbol) C0Instr_##name
-	C0_INSTR_TABLE
+#define C0_INSTR(name, arg_type, ret_type, arg_count, symbol) C0Instr_##name,
+	#include "c0_instr.h"
 #undef C0_INSTR
 	C0Instr_COUNT
 };
 
 static char const *const c0_instr_names[C0Instr_COUNT] = {
-#define C0_INSTR(name, type, arg_count, symbol) #name
-	C0_INSTR_TABLE
+#define C0_INSTR(name, arg_type, ret_type, arg_count, symbol) #name,
+	#include "c0_instr.h"
+#undef C0_INSTR
+};
+
+static C0BasicType const c0_instr_arg_type[C0Instr_COUNT] = {
+#define C0_INSTR(name, arg_type, ret_type, arg_count, symbol) C0Basic_##arg_type,
+	#include "c0_instr.h"
 #undef C0_INSTR
 };
 
 static C0BasicType const c0_instr_ret_type[C0Instr_COUNT] = {
-#define C0_INSTR(name, type, arg_count, symbol) C0Basic_##type
-	C0_INSTR_TABLE
+#define C0_INSTR(name, arg_type, ret_type, arg_count, symbol) C0Basic_##ret_type,
+	#include "c0_instr.h"
 #undef C0_INSTR
 };
 
 // negative value implies a variable length
 static i32 const c0_instr_arg_count[C0Instr_COUNT] = {
-#define C0_INSTR(name, type, arg_count, symbol) arg_count
-	C0_INSTR_TABLE
+#define C0_INSTR(name, arg_type, ret_type, arg_count, symbol) arg_count,
+	#include "c0_instr.h"
 #undef C0_INSTR
 };
 
 // negative value implies a variable length
 static char const *const c0_instr_symbols[C0Instr_COUNT] = {
-#define C0_INSTR(name, type, arg_count, symbol) symbol
-	C0_INSTR_TABLE
+#define C0_INSTR(name, arg_type, ret_type, arg_count, symbol) symbol,
+	#include "c0_instr.h"
 #undef C0_INSTR
 };
 
@@ -756,6 +339,8 @@ struct C0Gen {
 	C0Array(C0AggType *) types;
 	C0Array(C0Proc *)    procs;
 
+	C0AggType *basic_agg[C0Basic_COUNT];
+
 	u8 instrs_to_generate[C0Instr_COUNT];
 	u8 convert_to_generate[C0Basic_COUNT][C0Basic_COUNT];
 	u8 reinterpret_to_generate[C0Basic_COUNT][C0Basic_COUNT];
@@ -767,23 +352,61 @@ struct C0Loc {
 	i32 column;
 };
 
-struct C0Instr {
-	C0InstrKind kind;
-	C0BasicType basic_type;
-	u16         padding0;
-	u32         uses;
-	u32         alignment;
-	C0Instr *   parent;
+typedef u32 C0InstrFlags;
+enum C0InstrFlags_enum {
+	C0InstrFlag_print_inline = 1u<<16u,
+};
 
-	C0AggType *agg_type;
+struct C0Instr {
+	C0InstrKind  kind;
+	C0BasicType  basic_type;
+	u16          padding0;
+	u32          uses;
+	u32          alignment; // optional
+	C0Instr *    parent;
+	C0InstrFlags flags;
+
+	C0AggType *agg_type; // if set, overrides `basic_type`
 
 	u32      id;
 	C0String name;
-	C0Proc  *call_proc;
+	C0Proc    *call_proc;
+	C0AggType *call_sig;
 
+	/*
+		unary expression:  args_len == 1
+		conversion:        args_len == 1
+		binary expression: args_len == 2
+		load:              args_len == 1
+		store:             args_len == 2
+		addr:              args_len == 1
+		index_ptr:         args_len == 2
+		atomic_cas:        args_len == 3
+			args[0] : obj
+			args[1] : expected
+			args[2] : desired
+		memmove: args_len == 3
+			args[0] : dst
+			args[1] : src
+			args[2] : size
+		memset: args_len == 3
+			args[0] : dst
+			args[1] : val
+			args[2] : size
+		if statement
+			args[0] : condition
+			args[1] : else statement
+		return statement
+			args[0] : return value (if exists)
+	*/
 	C0Instr **args;
-	usize     args_len;
+	isize     args_len;
 
+	/*
+		block
+		if (block) (not else statement)
+		loop
+	*/
 	C0Array(C0Instr *) nested_instrs;
 
 	union {
@@ -801,10 +424,13 @@ struct C0Proc {
 	C0Gen *    gen;
 	C0String   name;
 	C0AggType *sig;
+	void *     user_data;
 
+	C0Array(C0Instr *) parameters;
 	C0Array(C0Instr *) instrs;
 	C0Array(C0Instr *) nested_blocks;
 	C0Array(C0Instr *) labels;
+
 };
 
 typedef u32 C0AggTypeKind;
@@ -882,7 +508,7 @@ C0Instr *c0_push_basic_u32(C0Proc *p, u32 value);
 C0Instr *c0_push_basic_i64(C0Proc *p, i64 value);
 C0Instr *c0_push_basic_u64(C0Proc *p, u64 value);
 C0Instr *c0_push_basic_ptr(C0Proc *p, u64 value);
-C0Instr *c0_push_bin(C0Proc *p, C0InstrKind kind, C0Instr *left, C0Instr *right);
+C0Instr *c0_push_bin(C0Proc *p, C0InstrKind kind, C0BasicType type, C0Instr *left, C0Instr *right);
 
 C0Instr *c0_push_negf(C0Proc *p, C0Instr *arg);
 C0Instr *c0_push_noti(C0Proc *p, C0Instr *arg);
