@@ -1,5 +1,8 @@
 #include "c0.c"
 
+#define C0_TB_IMPL
+#include "c0_tb.h"
+
 int main(int argc, char const **argv) {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	setvbuf(stderr, NULL, _IONBF, 0);
@@ -66,9 +69,16 @@ int main(int argc, char const **argv) {
 	c0_proc_finish(p);
 
 
+#if 1
+	TB_FeatureSet features = { 0 };
+	TB_Module* mod = tb_module_create_for_host(&features, true);
+
+	c0_tb_emit_proc(mod, p);
+#else
 	c0_gen_instructions_print(&gen);
 
 	c0_print_proc(p);
+#endif
 
 	fflush(stderr);
 	fflush(stdout);
